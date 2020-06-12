@@ -223,6 +223,8 @@ struct _GtkEntryPrivate
 
   gfloat        xalign;
 
+  gchar         *previous_selection;
+
   gint          ascent;                     /* font ascent in pango units  */
   gint          current_pos;
   gint          descent;                    /* font descent in pango units */
@@ -2783,6 +2785,8 @@ gtk_entry_init (GtkEntry *entry)
   priv->progress_fraction = 0.0;
   priv->progress_pulse_fraction = 0.1;
 
+  priv->previous_selection = NULL;
+
   gtk_drag_dest_set (GTK_WIDGET (entry), 0, NULL, 0,
                      GDK_ACTION_COPY | GDK_ACTION_MOVE);
   gtk_drag_dest_add_text_targets (GTK_WIDGET (entry));
@@ -3031,6 +3035,8 @@ gtk_entry_finalize (GObject *object)
     g_object_unref (priv->text_handle);
   g_free (priv->placeholder_text);
   g_free (priv->im_module);
+
+  g_free (priv->previous_selection);
 
   g_clear_object (&priv->drag_gesture);
   g_clear_object (&priv->multipress_gesture);
@@ -7372,14 +7378,9 @@ primary_get_cb (GtkClipboard     *clipboard,
 		gpointer          data)
 {
   GtkEntry *entry = GTK_ENTRY (data);
-  gint start, end;
-  
-  if (gtk_editable_get_selection_bounds (GTK_EDITABLE (entry), &start, &end))
-    {
-      gchar *str = _gtk_entry_get_display_text (entry, start, end);
-      gtk_selection_data_set_text (selection_data, str, -1);
-      g_free (str);
-    }
+  GtkEntryPrivate *priv = entry->priv;
+
+  gtk_selection_data_set_text (selection_data, priv->previous_selection, -1);
 }
 
 static void
@@ -7388,6 +7389,9 @@ primary_clear_cb (GtkClipboard *clipboard,
 {
   GtkEntry *entry = GTK_ENTRY (data);
   GtkEntryPrivate *priv = entry->priv;
+
+  g_free(priv->previous_selection);
+  priv->previous_selection = NULL;
 
   gtk_editable_select_region (GTK_EDITABLE (entry), priv->current_pos, priv->current_pos);
 }
@@ -7398,7 +7402,8 @@ gtk_entry_update_primary_selection (GtkEntry *entry)
   GtkTargetList *list;
   GtkTargetEntry *targets;
   GtkClipboard *clipboard;
-  gint start, end;
+  GtkEntryPrivate *priv = entry->priv;
+
   gint n_targets;
 
   if (!gtk_widget_get_realized (GTK_WIDGET (entry)))
@@ -7410,16 +7415,15 @@ gtk_entry_update_primary_selection (GtkEntry *entry)
   targets = gtk_target_table_new_from_list (list, &n_targets);
 
   clipboard = gtk_widget_get_clipboard (GTK_WIDGET (entry), GDK_SELECTION_PRIMARY);
-  
-  if (gtk_editable_get_selection_bounds (GTK_EDITABLE (entry), &start, &end))
+
+  gchar *text = _gtk_entry_get_selected_text (entry);
+
+  if (text)
     {
+      g_free(priv->previous_selection);
+      priv->previous_selection = text;
       gtk_clipboard_set_with_owner (clipboard, targets, n_targets,
                                     primary_get_cb, primary_clear_cb, G_OBJECT (entry));
-    }
-  else
-    {
-      if (gtk_clipboard_get_owner (clipboard) == G_OBJECT (entry))
-	gtk_clipboard_clear (clipboard);
     }
 
   gtk_target_table_free (targets, n_targets);
