@@ -1,4 +1,3 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* GTK - The GIMP Toolkit
  * Copyright (C) 1995-1997 Peter Mattis, Spencer Kimball and Josh MacDonald
  * Copyright (C) 2004-2006 Christian Hammond
@@ -215,6 +214,7 @@ struct _GtkEntryPrivate
 
   GtkGesture    *drag_gesture;
   GtkGesture    *multipress_gesture;
+  GtkGesture    *middle_click_pressed;
 
   GtkCssGadget  *gadget;
   GtkCssGadget  *progress_gadget;
@@ -224,6 +224,7 @@ struct _GtkEntryPrivate
   gfloat        xalign;
 
   gchar         *previous_selection;
+  gchar         *previous_selection_tmp;
 
   gint          ascent;                     /* font ascent in pango units  */
   gint          current_pos;
@@ -516,7 +517,8 @@ static void     gtk_entry_real_set_position    (GtkEditable *editable,
 static gint     gtk_entry_get_position         (GtkEditable *editable);
 static void     gtk_entry_set_selection_bounds (GtkEditable *editable,
 						gint         start,
-						gint         end);
+						gint         end,
+                                                gboolean     update_primary_selection);
 static gboolean gtk_entry_get_selection_bounds (GtkEditable *editable,
 						gint        *start,
 						gint        *end);
@@ -580,6 +582,18 @@ static void   gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gestur
                                                     gdouble               x,
                                                     gdouble               y,
                                                     GtkEntry             *entry);
+static void   gtk_entry_multipress_gesture_released (GtkGestureMultiPress *gesture,
+                                                     gint                  n_press,
+                                                     gdouble               x,
+                                                     gdouble               y,
+                                                     GtkEntry             *entry);
+
+static void gtk_entry_middle_click_pressed (GtkGestureMultiPress *gesture,
+                                            gint                  n_press,
+                                            gdouble               widget_x,
+                                            gdouble               widget_y,
+                                            GtkEntry             *entry);
+
 static void   gtk_entry_drag_gesture_update        (GtkGestureDrag *gesture,
                                                     gdouble         offset_x,
                                                     gdouble         offset_y,
@@ -629,7 +643,8 @@ static void         gtk_entry_select_word              (GtkEntry       *entry);
 static void         gtk_entry_select_line              (GtkEntry       *entry);
 static void         gtk_entry_paste                    (GtkEntry       *entry,
 							GdkAtom         selection);
-static void         gtk_entry_update_primary_selection (GtkEntry       *entry);
+static void         gtk_entry_update_primary_selection (GtkEntry       *entry,
+                                                        gchar         **buf);
 static void         gtk_entry_do_popup                 (GtkEntry       *entry,
 							const GdkEvent *event);
 static gboolean     gtk_entry_mnemonic_activate        (GtkWidget      *widget,
@@ -2786,6 +2801,7 @@ gtk_entry_init (GtkEntry *entry)
   priv->progress_pulse_fraction = 0.1;
 
   priv->previous_selection = NULL;
+  priv->previous_selection_tmp = NULL;
 
   gtk_drag_dest_set (GTK_WIDGET (entry), 0, NULL, 0,
                      GDK_ACTION_COPY | GDK_ACTION_MOVE);
@@ -2814,11 +2830,20 @@ gtk_entry_init (GtkEntry *entry)
                     G_CALLBACK (gtk_entry_drag_gesture_end), entry);
   gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (priv->drag_gesture), 0);
   gtk_gesture_single_set_exclusive (GTK_GESTURE_SINGLE (priv->drag_gesture), TRUE);
+//   gtk_gesture_single_set_exclusive (GTK_GESTURE_SINGLE (priv->drag_gesture), FALSE); // setting this to false should allow events to propagate further, but it still eats up middle click after mouse1 click
 
   priv->multipress_gesture = gtk_gesture_multi_press_new (GTK_WIDGET (entry));
   g_signal_connect (priv->multipress_gesture, "pressed",
                     G_CALLBACK (gtk_entry_multipress_gesture_pressed), entry);
+  g_signal_connect (priv->multipress_gesture, "released",
+                    G_CALLBACK (gtk_entry_multipress_gesture_released), entry);
   gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (priv->multipress_gesture), 0);
+  gtk_gesture_single_set_exclusive (GTK_GESTURE_SINGLE (priv->multipress_gesture), TRUE);
+
+  priv->middle_click_pressed = gtk_gesture_multi_press_new (GTK_WIDGET (entry));
+  g_signal_connect (priv->middle_click_pressed, "pressed",
+                    G_CALLBACK (gtk_entry_middle_click_pressed), entry);
+  gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (priv->middle_click_pressed), 2);
   gtk_gesture_single_set_exclusive (GTK_GESTURE_SINGLE (priv->multipress_gesture), TRUE);
 
   widget_node = gtk_widget_get_css_node (GTK_WIDGET (entry));
@@ -3037,6 +3062,7 @@ gtk_entry_finalize (GObject *object)
   g_free (priv->im_module);
 
   g_free (priv->previous_selection);
+  g_free (priv->previous_selection_tmp);
 
   g_clear_object (&priv->drag_gesture);
   g_clear_object (&priv->multipress_gesture);
@@ -3436,7 +3462,7 @@ gtk_entry_realize (GtkWidget *widget)
   gtk_im_context_set_client_window (priv->im_context, priv->text_area);
 
   gtk_entry_adjust_scroll (entry);
-  gtk_entry_update_primary_selection (entry);
+  gtk_entry_update_primary_selection (entry, &priv->previous_selection);
 
   /* If the icon positions are already setup, create their windows.
    * Otherwise if they don't exist yet, then construct_icon_info()
@@ -4433,6 +4459,53 @@ gesture_get_current_point_in_layout (GtkGestureSingle *gesture,
 }
 
 static void
+gtk_entry_middle_click_pressed (GtkGestureMultiPress *gesture,
+                                gint                  n_press,
+                                gdouble               widget_x,
+                                gdouble               widget_y,
+                                GtkEntry             *entry)
+{
+  GtkWidget *widget = GTK_WIDGET (entry);
+  GtkEntryPrivate *priv = entry->priv;
+  GdkEventSequence *current;
+  gint x, y;
+  gint tmp_pos;
+
+  current = gtk_gesture_single_get_current_sequence (GTK_GESTURE_SINGLE (gesture));
+
+  gtk_gesture_set_sequence_state (GTK_GESTURE (gesture), current,
+                                  GTK_EVENT_SEQUENCE_CLAIMED);
+
+  gesture_get_current_point_in_layout (GTK_GESTURE_SINGLE (gesture), entry, &x, &y);
+  gtk_entry_reset_blink_time (entry);
+
+  if (!gtk_widget_has_focus (widget))
+    {
+      priv->in_click = TRUE;
+      gtk_widget_grab_focus (widget);
+      priv->in_click = FALSE;
+    }
+
+  tmp_pos = gtk_entry_find_position (entry, x);
+
+
+  if (get_middle_click_paste (entry))
+    {
+      if (priv->editable)
+        {
+          priv->insert_pos = tmp_pos;
+          gtk_entry_paste (entry, GDK_SELECTION_PRIMARY);
+        }
+      else
+        {
+          gtk_widget_error_bell (widget);
+        }
+    }
+}
+
+
+
+static void
 gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
                                       gint                  n_press,
                                       gdouble               widget_x,
@@ -4448,7 +4521,9 @@ gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
   guint button;
   gint tmp_pos;
 
+
   button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (gesture));
+
   current = gtk_gesture_single_get_current_sequence (GTK_GESTURE_SINGLE (gesture));
   event = gtk_gesture_get_last_event (GTK_GESTURE (gesture), current);
 
@@ -4469,19 +4544,6 @@ gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
   if (gdk_event_triggers_context_menu (event))
     {
       gtk_entry_do_popup (entry, event);
-    }
-  else if (n_press == 1 && button == GDK_BUTTON_MIDDLE &&
-           get_middle_click_paste (entry))
-    {
-      if (priv->editable)
-        {
-          priv->insert_pos = tmp_pos;
-          gtk_entry_paste (entry, GDK_SELECTION_PRIMARY);
-        }
-      else
-        {
-          gtk_widget_error_bell (widget);
-        }
     }
   else if (button == GDK_BUTTON_PRIMARY)
     {
@@ -4573,12 +4635,23 @@ gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
           priv->select_words = TRUE;
           gtk_entry_select_word (entry);
           if (is_touchscreen)
-            mode = GTK_TEXT_HANDLE_MODE_SELECTION;
+            {
+              mode = GTK_TEXT_HANDLE_MODE_SELECTION;
+              gtk_entry_update_primary_selection (entry, &priv->previous_selection);
+            }
           break;
 
         case 3:
           priv->select_lines = TRUE;
           gtk_entry_select_line (entry);
+
+          // the double click updated the selection buffer. 
+          // we restore it to the state before the double click,
+          // so we can do middle click paste-over
+          g_free(priv->previous_selection);
+          priv->previous_selection = g_strdup (priv->previous_selection_tmp);
+          gtk_entry_update_primary_selection (entry, &priv->previous_selection_tmp);
+
           if (is_touchscreen)
             mode = GTK_TEXT_HANDLE_MODE_SELECTION;
           break;
@@ -4615,9 +4688,37 @@ gtk_entry_multipress_gesture_pressed (GtkGestureMultiPress *gesture,
       if (priv->text_handle)
         gtk_entry_update_handles (entry, mode);
     }
+}
 
-  if (n_press >= 3)
-    gtk_event_controller_reset (GTK_EVENT_CONTROLLER (gesture));
+static void
+gtk_entry_multipress_gesture_released (GtkGestureMultiPress *gesture,
+                                       gint                  n_press,
+                                       gdouble               widget_x,
+                                       gdouble               widget_y,
+                                       GtkEntry             *entry)
+{
+  GtkEntryPrivate *priv = entry->priv;
+  if (n_press ==2) 
+    {
+      GtkClipboard *clipboard = gtk_widget_get_clipboard (GTK_WIDGET (entry), GDK_SELECTION_PRIMARY);
+
+      /* before we make the new double-click-selected text available 
+       * in the X primary selection buffer, we memorized what 
+       * was previously there. If a triple click (press) happens afterwards,
+       * the previous selection is restored. That way we can do
+       * middle-click-pasteover also with line selections 
+       */
+
+     g_free(priv->previous_selection_tmp);
+     priv->previous_selection_tmp = gtk_clipboard_wait_for_text (clipboard);
+
+      gtk_entry_update_primary_selection (entry, &priv->previous_selection);
+    }
+
+  else if (n_press >=3) 
+    {
+      gtk_event_controller_reset (GTK_EVENT_CONTROLLER (gesture));
+    }
 }
 
 static gchar *
@@ -4832,7 +4933,7 @@ gtk_entry_drag_gesture_end (GtkGestureDrag *gesture,
       !gtk_editable_get_selection_bounds (GTK_EDITABLE (entry), NULL, NULL))
     gtk_entry_update_handles (entry, GTK_TEXT_HANDLE_MODE_CURSOR);
 
-  gtk_entry_update_primary_selection (entry);
+  gtk_entry_update_primary_selection (entry, &priv->previous_selection);
 }
 
 static void
@@ -5028,7 +5129,7 @@ _gtk_entry_grab_focus (GtkEntry  *entry,
 {
   GTK_WIDGET_CLASS (gtk_entry_parent_class)->grab_focus (GTK_WIDGET (entry));
   if (select_all)
-    gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+    gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1, TRUE);
 }
 
 static void
@@ -5119,7 +5220,7 @@ gtk_entry_state_flags_changed (GtkWidget     *widget,
   if (!gtk_widget_is_sensitive (widget))
     {
       /* Clear any selection */
-      gtk_editable_select_region (GTK_EDITABLE (entry), priv->current_pos, priv->current_pos);
+      gtk_editable_select_region (GTK_EDITABLE (entry), priv->current_pos, priv->current_pos, TRUE);
     }
 
   update_node_state (entry);
@@ -5226,7 +5327,8 @@ gtk_entry_get_position (GtkEditable *editable)
 static void
 gtk_entry_set_selection_bounds (GtkEditable *editable,
 				gint         start,
-				gint         end)
+				gint         end,
+                                gboolean     update_primary_selection)
 {
   GtkEntry *entry = GTK_ENTRY (editable);
   guint length;
@@ -5243,7 +5345,12 @@ gtk_entry_set_selection_bounds (GtkEditable *editable,
 			   MIN (end, length),
 			   MIN (start, length));
 
-  gtk_entry_update_primary_selection (entry);
+
+  if (update_primary_selection)
+    {
+      GtkEntryPrivate *priv = entry->priv;
+      gtk_entry_update_primary_selection (entry, &priv->previous_selection);
+    }
 }
 
 static gboolean
@@ -5479,7 +5586,7 @@ buffer_deleted_text (GtkEntryBuffer *buffer,
   gtk_entry_recompute (entry);
 
   /* We might have deleted the selection */
-  gtk_entry_update_primary_selection (entry);
+  gtk_entry_update_primary_selection (entry, &priv->previous_selection);
 
   /* Disable the password hint if one exists. */
   if (!priv->visible)
@@ -5706,7 +5813,7 @@ gtk_entry_move_cursor (GtkEntry       *entry,
     }
 
   if (extend_selection)
-    gtk_editable_select_region (GTK_EDITABLE (entry), priv->selection_bound, new_pos);
+    gtk_editable_select_region (GTK_EDITABLE (entry), priv->selection_bound, new_pos, TRUE);
   else
     gtk_editable_set_position (GTK_EDITABLE (entry), new_pos);
   
@@ -6727,6 +6834,7 @@ gtk_entry_handle_drag_finished (GtkTextHandle         *handle,
       if (g_get_monotonic_time() - priv->handle_place_time < double_click_time * 1000)
         {
           gtk_entry_select_word (entry);
+          gtk_entry_update_primary_selection (entry, &priv->previous_selection);
           gtk_entry_update_handles (entry, GTK_TEXT_HANDLE_MODE_SELECTION);
         }
       else
@@ -7278,13 +7386,13 @@ gtk_entry_select_word (GtkEntry *entry)
   gint start_pos = gtk_entry_move_backward_word (entry, priv->current_pos, TRUE);
   gint end_pos = gtk_entry_move_forward_word (entry, priv->current_pos, TRUE);
 
-  gtk_editable_select_region (GTK_EDITABLE (entry), start_pos, end_pos);
+  gtk_editable_select_region (GTK_EDITABLE (entry), start_pos, end_pos, FALSE);
 }
 
 static void
 gtk_entry_select_line (GtkEntry *entry)
 {
-  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1, FALSE);
 }
 
 static gint
@@ -7309,7 +7417,7 @@ paste_received (GtkClipboard *clipboard,
   GtkEntryPrivate *priv = entry->priv;
   guint button;
 
-  button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (priv->multipress_gesture));
+  button = gtk_gesture_single_get_current_button (GTK_GESTURE_SINGLE (priv->middle_click_pressed));
 
   if (button == GDK_BUTTON_MIDDLE)
     {
@@ -7317,7 +7425,7 @@ paste_received (GtkClipboard *clipboard,
       pos = priv->insert_pos;
       gtk_editable_get_selection_bounds (editable, &start, &end);
       if (!((start <= pos && pos <= end) || (end <= pos && pos <= start)))
-	gtk_editable_select_region (editable, pos, pos);
+	gtk_editable_select_region (editable, pos, pos, TRUE);
     }
       
   if (text)
@@ -7390,14 +7498,11 @@ primary_clear_cb (GtkClipboard *clipboard,
   GtkEntry *entry = GTK_ENTRY (data);
   GtkEntryPrivate *priv = entry->priv;
 
-  g_free(priv->previous_selection);
-  priv->previous_selection = NULL;
-
-  gtk_editable_select_region (GTK_EDITABLE (entry), priv->current_pos, priv->current_pos);
+  gtk_editable_select_region (GTK_EDITABLE (entry), priv->current_pos, priv->current_pos, TRUE);
 }
 
 static void
-gtk_entry_update_primary_selection (GtkEntry *entry)
+gtk_entry_update_primary_selection (GtkEntry *entry, gchar **buf)
 {
   GtkTargetList *list;
   GtkTargetEntry *targets;
@@ -7420,8 +7525,9 @@ gtk_entry_update_primary_selection (GtkEntry *entry)
 
   if (text)
     {
-      g_free(priv->previous_selection);
-      priv->previous_selection = text;
+      g_free(*buf);
+      *buf = text;
+
       gtk_clipboard_set_with_owner (clipboard, targets, n_targets,
                                     primary_get_cb, primary_clear_cb, G_OBJECT (entry));
     }

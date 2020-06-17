@@ -1821,7 +1821,7 @@ gtk_entry_completion_real_insert_prefix (GtkEntryCompletion *completion,
           gtk_editable_insert_text (GTK_EDITABLE (completion->priv->entry),
                                     prefix + strlen (key), -1, &pos);
           gtk_editable_select_region (GTK_EDITABLE (completion->priv->entry),
-                                      key_len, prefix_len);
+                                      key_len, prefix_len, TRUE); // xxx
 
           completion->priv->has_completion = TRUE;
         }
@@ -1867,7 +1867,7 @@ gtk_entry_completion_insert_completion_text (GtkEntryCompletion *completion,
   gtk_entry_set_text (GTK_ENTRY (priv->entry), text);
 
   len = strlen (priv->completion_prefix);
-  gtk_editable_select_region (GTK_EDITABLE (priv->entry), len, -1);
+  gtk_editable_select_region (GTK_EDITABLE (priv->entry), len, -1, TRUE); //xxx
 
   if (priv->changed_id > 0)
     g_signal_handler_unblock (priv->entry, priv->changed_id);

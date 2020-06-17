@@ -1108,7 +1108,7 @@ gtk_entry_accessible_add_selection (AtkText *text,
 
   if (!gtk_editable_get_selection_bounds (GTK_EDITABLE (entry), &start, &end))
     {
-      gtk_editable_select_region (GTK_EDITABLE (entry), start_pos, end_pos);
+      gtk_editable_select_region (GTK_EDITABLE (entry), start_pos, end_pos, TRUE);
       return TRUE;
     }
   else
@@ -1131,7 +1131,7 @@ gtk_entry_accessible_remove_selection (AtkText *text,
 
   if (gtk_editable_get_selection_bounds (GTK_EDITABLE (widget), &start, &end))
     {
-      gtk_editable_select_region (GTK_EDITABLE (widget), end, end);
+      gtk_editable_select_region (GTK_EDITABLE (widget), end, end, TRUE);
       return TRUE;
     }
   else
@@ -1156,7 +1156,7 @@ gtk_entry_accessible_set_selection (AtkText *text,
 
   if (gtk_editable_get_selection_bounds (GTK_EDITABLE (widget), &start, &end))
     {
-      gtk_editable_select_region (GTK_EDITABLE (widget), start_pos, end_pos);
+      gtk_editable_select_region (GTK_EDITABLE (widget), start_pos, end_pos, TRUE);
       return TRUE;
     }
   else

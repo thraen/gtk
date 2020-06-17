@@ -1047,7 +1047,7 @@ _gtk_file_chooser_entry_select_filename (GtkFileChooserEntry *chooser_entry)
        len = g_utf8_pointer_to_offset (str, ext);
     }
 
-  gtk_editable_select_region (GTK_EDITABLE (chooser_entry), 0, (gint) len);
+  gtk_editable_select_region (GTK_EDITABLE (chooser_entry), 0, (gint) len, TRUE);
 }
 
 void

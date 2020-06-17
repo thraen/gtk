@@ -2030,7 +2030,7 @@ gtk_cell_renderer_text_start_editing (GtkCellRenderer      *cell,
     gtk_entry_set_text (GTK_ENTRY (priv->entry), priv->text);
   g_object_set_data_full (G_OBJECT (priv->entry), I_(GTK_CELL_RENDERER_TEXT_PATH), g_strdup (path), g_free);
   
-  gtk_editable_select_region (GTK_EDITABLE (priv->entry), 0, -1);
+  gtk_editable_select_region (GTK_EDITABLE (priv->entry), 0, -1, TRUE);
 
   priv->in_entry_menu = FALSE;
   if (priv->entry_menu_popdown_timeout)

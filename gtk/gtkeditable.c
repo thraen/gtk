@@ -371,11 +371,13 @@ gtk_editable_delete_selection (GtkEditable *editable)
 void
 gtk_editable_select_region (GtkEditable *editable,
 			    gint         start_pos,
-			    gint         end_pos)
+			    gint         end_pos,
+                            gboolean     update_primary_buffer)
+
 {
   g_return_if_fail (GTK_IS_EDITABLE (editable));
   
-  GTK_EDITABLE_GET_IFACE (editable)->set_selection_bounds (editable, start_pos, end_pos);
+  GTK_EDITABLE_GET_IFACE (editable)->set_selection_bounds (editable, start_pos, end_pos, update_primary_buffer);
 }
 
 /**

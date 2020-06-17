@@ -71,7 +71,8 @@ struct _GtkEditableInterface
 				     gint            end_pos);
   void (* set_selection_bounds)     (GtkEditable    *editable,
 				     gint            start_pos,
-				     gint            end_pos);
+				     gint            end_pos,
+                                     gboolean     update_primary_buffer);
   gboolean (* get_selection_bounds) (GtkEditable    *editable,
 				     gint           *start_pos,
 				     gint           *end_pos);
@@ -85,7 +86,8 @@ GType    gtk_editable_get_type             (void) G_GNUC_CONST;
 GDK_AVAILABLE_IN_ALL
 void     gtk_editable_select_region        (GtkEditable *editable,
 					    gint         start_pos,
-					    gint         end_pos);
+					    gint         end_pos,
+                                            gboolean     update_primary_buffer);
 GDK_AVAILABLE_IN_ALL
 gboolean gtk_editable_get_selection_bounds (GtkEditable *editable,
 					    gint        *start_pos,

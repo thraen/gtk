@@ -3919,7 +3919,7 @@ create_entry (GtkWidget *widget)
       
       entry = gtk_entry_new ();
       gtk_entry_set_text (GTK_ENTRY (entry), "hello world \330\247\331\204\330\263\331\204\330\247\331\205 \330\271\331\204\331\212\331\203\331\205");
-      gtk_editable_select_region (GTK_EDITABLE (entry), 0, 5);
+      gtk_editable_select_region (GTK_EDITABLE (entry), 0, 5, TRUE);
       gtk_box_pack_start (GTK_BOX (hbox), entry, TRUE, TRUE, 0);
 
       cb = GTK_COMBO_BOX_TEXT (gtk_combo_box_text_new_with_entry ());
@@ -3938,7 +3938,7 @@ create_entry (GtkWidget *widget)
 
       cb_entry = gtk_bin_get_child (GTK_BIN (cb));
       gtk_entry_set_text (GTK_ENTRY (cb_entry), "hello world \n\n\n foo");
-      gtk_editable_select_region (GTK_EDITABLE (cb_entry), 0, -1);
+      gtk_editable_select_region (GTK_EDITABLE (cb_entry), 0, -1, TRUE);
       gtk_box_pack_start (GTK_BOX (box2), GTK_WIDGET (cb), TRUE, TRUE, 0);
 
       sensitive_check = gtk_check_button_new_with_label("Sensitive");

@@ -247,7 +247,7 @@ create_widgets (void)
   gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cb), "item2");
   gtk_combo_box_text_append_text (GTK_COMBO_BOX_TEXT (cb), "item2");
   gtk_entry_set_text (GTK_ENTRY (entry), "hello world ♥ foo");
-  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1, TRUE);
   gtk_box_pack_start (GTK_BOX (vbox), cb, TRUE, TRUE, 0);
 
   sw = gtk_scrolled_window_new (NULL, NULL);

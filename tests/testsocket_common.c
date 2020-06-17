@@ -148,7 +148,7 @@ create_combo (void)
 
   entry = gtk_bin_get_child (GTK_BIN (combo));
   gtk_entry_set_text (GTK_ENTRY (entry), "hello world");
-  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
+  gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1, TRUE);
 
   return GTK_WIDGET (combo);
 }
